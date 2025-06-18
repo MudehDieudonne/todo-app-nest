@@ -1,12 +1,59 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { AuthDto } from './dto';
+import * as argon2 from 'argon2';
+import { PrismaClientKnownRequestError } from 'generated/prisma/runtime/library';
 
-@Injectable({})
+@Injectable()
 export class AuthService {
-  signup() {
-    return { msg: `I am sign up` };
+  constructor(private prisma: PrismaService) {}
+
+  async signup(dto: AuthDto) {
+    // Gnerate password hash
+    const hash = await argon2.hash(dto.password);
+    // Save new User on db
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          hash,
+        },
+        select: {
+          id: true,
+          email: true,
+        },
+      });
+      // Return the saved user
+      return user;
+    } catch (error) {
+      if (error instanceof PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ForbiddenException('Credentials already exist');
+        }
+      }
+      throw error;
+    }
   }
 
-  sigin() {
-    return { msg: `I am sign in` };
+  async signin(dto: AuthDto) {
+    // find user email
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email: dto.email,
+      },
+    });
+
+    //if email deos not exist throw error
+    if (!user) throw new ForbiddenException('Email deos not exist');
+
+    // if email exist compare password
+    const pswMatches = await argon2.verify(user.hash, dto.password);
+    // if incorrect throwerror
+    if (!pswMatches) throw new ForbiddenException('Pasword incorrect');
+
+    // send back(login) user
+    // delete user.hash;
+    console.log(user)
+    return user;
   }
 }
